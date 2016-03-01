@@ -1,0 +1,18 @@
+# Executables
+*.exe
+*.dll
+*.so
+
+# Directories
+bin/
+lib/
+obj/
+sandbox/*.*
+
+# Projects
+*.layout
+*.depend
+
+# Leftovers
+*.[Oo]bj
+*.[Pp]ch
