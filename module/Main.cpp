@@ -548,7 +548,8 @@ struct Server
                 // Obtain the event data
                 http_message * msg = reinterpret_cast< http_message * >(ev_data);
                 // Output the received info
-                MtVerboseMessage("Received data from '%s'\n%s", m_Addr.Host(), msg->message);
+                MtVerboseMessage("Received data from '%s'\n%.*s",
+                                    m_Addr.Host(),msg->message.len, msg->message.p);
                 // Inspect response
                 switch (msg->resp_code)
                 {
