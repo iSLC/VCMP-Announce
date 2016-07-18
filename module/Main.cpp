@@ -2,10 +2,6 @@
 #include "Base.hpp"
 
 // ------------------------------------------------------------------------------------------------
-#include <vcmp.h>
-#include <SimpleIni.h>
-
-// ------------------------------------------------------------------------------------------------
 #include <cstdio>
 #include <cstdlib>
 #include <cstdarg>
@@ -20,12 +16,11 @@
 #include <utility>
 
 // ------------------------------------------------------------------------------------------------
-#if defined(WIN32) || defined(_WIN32)
-    #include <Windows.h>
-#endif
+#include <mongoose.h>
 
 // ------------------------------------------------------------------------------------------------
-#include <mongoose.h>
+#include <vcmp.h>
+#include <SimpleIni.h>
 
 /* ------------------------------------------------------------------------------------------------
  * SOFTWARE INFORMATION
@@ -105,16 +100,6 @@ void MtVerboseMessage(CCStr msg, ...);
 void MtVerboseError(CCStr msg, ...);
 
 /* ------------------------------------------------------------------------------------------------
- * Bind specific functions to certain server events.
-*/
-void BindCallbacks();
-
-/* ------------------------------------------------------------------------------------------------
- * Undo changes made with BindCallbacks().
-*/
-void UnbindCallbacks();
-
-/* ------------------------------------------------------------------------------------------------
  * Simple parser that extracts URI information from a string.
 */
 struct URI
@@ -131,47 +116,71 @@ struct URI
     {
         // Is there even an address to parse?
         if (!address || strlen(address) <= 0)
+        {
             return;
+        }
         // Skip the protocol if it was specified
         if (strncmp(address, "http://", 7) == 0)
+        {
             address += 7; // Skip the protocol
+        }
         else if (strncmp(address, "https://", 8) == 0)
+        {
             address += 8; // Skip the protocol
+        }
         // Find where the port starts
         CCStr port = strchr(address, ':');
         // Find where the path starts
         CCStr path = strchr(port ? port : address, '/');
         // Did we find the port separator?
         if (port)
+        {
             // Copy everything until the port separator
             mHost.assign(address, port - address);
+        }
         // Did we find the path separator?
         else if(path)
+        {
             // Copy everything until the path separator
             mHost.assign(address, path - address);
+        }
         // The entire address is the host
         else
+        {
             // Copy the entire address
             mHost.assign(address);
+        }
         // Should we skip the port separator?
         if (port)
+        {
             ++port;
+        }
         // Did we find both a port and path?
         if (port && path)
+        {
             // Copy everything between the port and path separators
             mPort.assign(port, path - port);
+        }
         else if (port)
+        {
             // Copy everything after the port separator
             mPort.assign(port);
+        }
         // Assign the default port
         else
+        {
             mPort.assign("80");
+        }
         // Copy the path if necessary
         if (path)
+        {
             mPath.assign(path);
+        }
         // Assign a default path just in case
         else
+        {
             mPath.assign("/");
+        }
         // Generate the full URI
         mFull.assign("http://");
         mFull.append(mHost);
@@ -336,7 +345,9 @@ struct Server
         o.m_Conn = nullptr;
         // Re-associate the connection if necessary
         if (m_Conn)
+        {
             m_Conn->user_data = this;
+        }
     }
 
     /* ---------------------------------------------------------------------------------------------
@@ -344,10 +355,11 @@ struct Server
     */
     ~Server()
     {
-        // Is there an ongoing connection?
+        // Disassociate this connection with this server, if necessary
         if (m_Conn)
-            // Disassociate this connection with this server
+        {
             m_Conn->user_data = nullptr;
+        }
     }
 
     /* ---------------------------------------------------------------------------------------------
@@ -371,7 +383,9 @@ struct Server
             o.m_Conn = nullptr;
             // Re-associate the connection if necessary
             if (m_Conn)
+            {
                 m_Conn->user_data = this;
+            }
         }
         return *this;
     }
@@ -405,7 +419,8 @@ struct Server
     */
     void Failed()
     {
-        if (++m_Fails >= 3)
+        // After one thousand failed attempts, there's no point in insisting
+        if (++m_Fails >= 1000)
         {
             MtVerboseError("Master-server '%s' was marked as invalid after %u failures",
                             m_Addr.Addr(), m_Fails);
@@ -432,11 +447,11 @@ struct Server
     {
         char body[32];
         // Generate the post data
-        if (snprintf(body, sizeof(body), "port=%d", g_Settings.uPort) < 0)
+        if (snprintf(body, sizeof(body), "port=%d", g_Settings.port) < 0)
         {
             VerboseError("Unable to generate the post data for '%s'", m_Addr.Host());
             // Make sure the data is null terminated
-            m_Data[0] = 0;
+            m_Data[0] = '\0';
             // Make sure this is marked as invalid
             m_Valid = false;
         }
@@ -455,7 +470,7 @@ struct Server
         {
             VerboseError("Unable to generate the payload message for '%s'", m_Addr.Host());
             // Make sure the data is null terminated
-            m_Data[0] = 0;
+            m_Data[0] = '\0';
             // Make sure this is marked as invalid
             m_Valid = false;
         }
@@ -474,7 +489,9 @@ struct Server
     {
         // Is there a connection already waiting response and are we allowed to update?
         if (m_Conn || !m_Valid)
+        {
             return; // Keep waiting for a reply and ignore this request
+        }
         // Attempt to create a connection to the associated master-server
         m_Conn = mg_connect(manager, m_Addr.Addr(), EventHandler);
         // Make sure that the connection could be created
@@ -518,7 +535,9 @@ struct Server
                 }
                 // Specify that this connection is valid and should continue to be updated
                 else
+                {
                     MakeValid();
+                }
             } break;
             case MG_EV_HTTP_REPLY:
             {
@@ -599,10 +618,14 @@ struct Server
     {
         // Is there any user-data associated with this connection?
         if (nc->user_data)
+        {
             static_cast< Server * >(nc->user_data)->HandleEvent(nc, ev, ev_data);
+        }
         // Close this connection immediately and ignore it
         else
+        {
             nc->flags |= MG_F_CLOSE_IMMEDIATELY;
+        }
     }
 
 private:
@@ -641,12 +664,13 @@ void AnnounceThread(Servers && servers)
     memset(&manager, 0, sizeof(mg_mgr));
     memset(&options, 0, sizeof(mg_serve_http_opts));
     // Initialize the connection manager
-    mg_mgr_init(&manager, NULL);
+    mg_mgr_init(&manager, nullptr);
     // Send the initial update to all master-servers
     for (auto & server : servers)
-        // Attempt to update this server
+    {
         server.Update(&manager);
-    // Used to know how many server update were skipped
+    }
+    // Used to know how many server updates were skipped
     unsigned count = 0;
     // Enter the announcement loop
     while (g_Announce)
@@ -655,13 +679,16 @@ void AnnounceThread(Servers && servers)
         mg_mgr_poll(&manager, 250);
         // See if we must issue any updates
         if (++count < 240)
+        {
             continue;
+        }
         // Reset the counter
         count = 0;
         // Process the specified servers
         for (auto & server : servers)
-            // Attempt to update this server
+        {
             server.Update(&manager);
+        }
     }
     // Release the connection manager resources
     mg_mgr_free(&manager);
@@ -679,9 +706,13 @@ void FlushMessages()
     {
         // Identify the message type and send it
         if (g_Messages.front().second)
+        {
             OutputMessage("%s", g_Messages.front().first.c_str());
+        }
         else
+        {
             OutputError("%s", g_Messages.front().first.c_str());
+        }
         // Pop the message from the queue
         g_Messages.pop();
     }
@@ -690,7 +721,7 @@ void FlushMessages()
 /* ------------------------------------------------------------------------------------------------
  * The server was initialized and this plug-in must initialize as well.
 */
-static int OnInitServer()
+static uint8_t OnServerInitialise(void)
 {
     // Obtain the server settings. We only need the port number
     _Func->GetServerSettings(&g_Settings);
@@ -709,13 +740,17 @@ static int OnInitServer()
         }
         // Move to the next server
         else
+        {
             ++n;
+        }
     }
     // See if any servers are left
     if (g_Servers.empty())
     {
         // We don't want to receive events anymore
-        UnbindCallbacks();
+        _Clbk->OnServerInitialise       = nullptr;
+        _Clbk->OnServerShutdown         = nullptr;
+        _Clbk->OnServerFrame            = nullptr;
     }
     else
     {
@@ -733,39 +768,27 @@ static int OnInitServer()
 /* ------------------------------------------------------------------------------------------------
  * The server was shutdown and this plug-in must terminate as well.
 */
-static void OnShutdownServer(void)
+static void OnServerShutdown(void)
 {
     // The server may still send callbacks
-    UnbindCallbacks();
+    _Clbk->OnServerInitialise       = nullptr;
+    _Clbk->OnServerShutdown         = nullptr;
+    _Clbk->OnServerFrame            = nullptr;
     // Tell the announce thread to stop
     g_Announce = false;
     // Wait for the announce thread to finish
     if (g_Thread.joinable())
+    {
         g_Thread.join();
+    }
     // Flush any remaining messages
     FlushMessages();
 }
 
-static void OnFrame(float /*delta*/)
+static void OnServerFrame(float /*delta*/)
 {
     // Flush any queued messages
     FlushMessages();
-}
-
-// ------------------------------------------------------------------------------------------------
-void BindCallbacks()
-{
-    _Clbk->OnInitServer             = OnInitServer;
-    _Clbk->OnShutdownServer         = OnShutdownServer;
-    _Clbk->OnFrame                  = OnFrame;
-}
-
-// ------------------------------------------------------------------------------------------------
-void UnbindCallbacks()
-{
-    _Clbk->OnInitServer             = nullptr;
-    _Clbk->OnShutdownServer         = nullptr;
-    _Clbk->OnFrame                  = nullptr;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -859,7 +882,9 @@ void VerboseMessage(CCStr msg, ...)
 {
     // Are verbose messages allowed?
     if (!g_Verbose)
+    {
         return;
+    }
     // Initialize the arguments list
     va_list args;
     va_start(args, msg);
@@ -874,7 +899,9 @@ void VerboseError(CCStr msg, ...)
 {
     // Are verbose messages allowed?
     if (!g_Verbose)
+    {
         return;
+    }
     // Initialize the arguments list
     va_list args;
     va_start(args, msg);
@@ -906,7 +933,9 @@ static void QueueMtMsg(bool type, CCStr msg, va_list args)
     va_end(args_cpy);
     // See if the format failed
     if (size < 0)
+    {
         return;
+    }
     // Remove unwanted characters
     buffer.resize(size+1);
     // Acquire a global lock
@@ -944,7 +973,9 @@ void MtVerboseMessage(CCStr msg, ...)
 {
     // Are verbose messages allowed?
     if (!g_Verbose)
+    {
         return;
+    }
     // Initialize the arguments list
     va_list args;
     va_start(args, msg);
@@ -959,7 +990,9 @@ void MtVerboseError(CCStr msg, ...)
 {
     // Are verbose messages allowed?
     if (!g_Verbose)
+    {
         return;
+    }
     // Initialize the arguments list
     va_list args;
     va_start(args, msg);
@@ -978,7 +1011,7 @@ SMOD_API_EXPORT unsigned int VcmpPluginInit(PluginFuncs* functions, PluginCallba
     // Output plug-in header
     puts("");
     OutputMessage("------------------------------------------------------------------");
-    OutputMessage("Plugin: %s", SMOD_NAME);
+    OutputMessage("Plug-in: %s", SMOD_NAME);
     OutputMessage("Author: %s", SMOD_AUTHOR);
     OutputMessage("Legal: %s", SMOD_COPYRIGHT);
     OutputMessage("------------------------------------------------------------------");
@@ -987,9 +1020,12 @@ SMOD_API_EXPORT unsigned int VcmpPluginInit(PluginFuncs* functions, PluginCallba
     _Func = functions;
     _Clbk = callbacks;
     _Info = info;
-    // Assign plug-in information
-    _Info->uPluginVer = SMOD_VERSION;
-    strcpy(_Info->szName, SMOD_HOST_NAME);
+    // Assign plug-in version
+    _Info->pluginVersion = SMOD_VERSION;
+    _Info->apiMajorVersion = PLUGIN_API_MAJOR;
+    _Info->apiMinorVersion = PLUGIN_API_MINOR;
+    // Assign the plug-in name
+    snprintf(_Info->name, sizeof(_Info->name), "%s", SMOD_HOST_NAME);
     // Create the configuration loader
     CSimpleIniA conf(false, true, true);
     // Attempt to load the configurations from disk
@@ -1004,7 +1040,7 @@ SMOD_API_EXPORT unsigned int VcmpPluginInit(PluginFuncs* functions, PluginCallba
             case SI_FILE:   OutputError("Failed to load the configuration file: announce.ini");
             default:        OutputError("Failed to load the configuration file for some unforeseen reason");
         }
-        // Plugin failed to load configurations
+        // Plug-in failed to load configurations
         return SMOD_FAILURE;
     }
     // See if the plug-in should output verbose information
@@ -1026,12 +1062,16 @@ SMOD_API_EXPORT unsigned int VcmpPluginInit(PluginFuncs* functions, PluginCallba
     {
         // See if there's even something that could resemble a server address
         if (!elem.pItem)
+        {
             continue;
+        }
         // Attempt to extract URI information from the currently processed address
         URI addr(elem.pItem);
         // See if a valid host could be extracted
         if (addr.mHost.empty())
+        {
             VerboseError("Master-server '%s' is an ill formed address", elem.pItem);
+        }
         // Construct a server instance using this address
         else
         {
@@ -1048,8 +1088,10 @@ SMOD_API_EXPORT unsigned int VcmpPluginInit(PluginFuncs* functions, PluginCallba
         // No point in loading the plug-in
         return SMOD_FAILURE;
     }
-    // Bind callbacks
-    BindCallbacks();
+    // Bind to the server callbacks
+    _Clbk->OnServerInitialise       = OnServerInitialise;
+    _Clbk->OnServerShutdown         = OnServerShutdown;
+    _Clbk->OnServerFrame            = OnServerFrame;
     // Notify that the plug-in was successfully loaded
     VerboseMessage("Successfully loaded %s", SMOD_NAME);
     // Done!
