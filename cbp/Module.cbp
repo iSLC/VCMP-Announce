@@ -187,7 +187,7 @@
 		<Linker>
 			<Add library="mongoose" />
 		</Linker>
-		<Unit filename="../external/Common/ConvertUTF.cpp" />
+		<Unit filename="../module/ConvertUTF.cpp" />
 		<Unit filename="../module/Main.cpp" />
 		<Extensions>
 			<code_completion />
