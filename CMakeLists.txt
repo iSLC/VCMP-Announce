@@ -6,6 +6,9 @@ option(FORCE_32BIT_BIN "Create a 32-bit executable binary if the compiler defaul
 
 # default to c++11 standard
 set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# apparently the above does not work with cmake from on debian 8
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 # default to release mode
 set(CMAKE_BUILD_TYPE "Release")
 # include mingw runntime into the binary
