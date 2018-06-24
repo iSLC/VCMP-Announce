@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.0.2)
 project(VCMP_Announce)
 
 option(BUILTIN_RUNTIMES "Include the MinGW runtime into the binary itself." ON)
