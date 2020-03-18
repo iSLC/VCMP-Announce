@@ -493,11 +493,11 @@ struct Server
             return; // Keep waiting for a reply and ignore this request
         }
         // Attempt to create a connection to the associated master-server
-        m_Conn = mg_connect(manager, m_Addr.Addr(), EventHandler);
+        m_Conn = mg_connect(manager, m_Addr.Full(), EventHandler);
         // Make sure that the connection could be created
         if (!m_Conn)
         {
-            MtVerboseError("Unable to create connection for '%s'", m_Addr.Addr());
+            MtVerboseError("Unable to create connection for '%s'", m_Addr.Full());
             // This operation failed
             Failed();
         }
@@ -510,7 +510,7 @@ struct Server
             // Send the payload data
             mg_printf(m_Conn, "%s", m_Data);
             // Verbose status
-            MtVerboseMessage("Connection created for '%s'", m_Addr.Addr());
+            MtVerboseMessage("Connection created for '%s'", m_Addr.Full());
         }
     }
 
