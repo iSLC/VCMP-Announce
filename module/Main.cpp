@@ -59,6 +59,7 @@ PluginInfo*         _Info = nullptr;
 // ------------------------------------------------------------------------------------------------
 static ServerSettings       g_Settings;
 static unsigned int         g_ServerVersion;
+static unsigned int         g_UpdateInterval;
 
 /* ------------------------------------------------------------------------------------------------
  * Output a message only if the _DEBUG was defined.
@@ -530,7 +531,7 @@ void AnnounceThread(Servers && servers)
         // Grab the current time point
         std::chrono::time_point< std::chrono::steady_clock > next = std::chrono::steady_clock::now();
         // Set the time-point for next update
-        next += std::chrono::seconds(60);
+        next += std::chrono::seconds(g_UpdateInterval);
         // Tell the master-list we're alive
         for (auto & server : servers)
         {
@@ -904,6 +905,12 @@ SMOD_API_EXPORT unsigned int VcmpPluginInit(PluginFuncs* functions, PluginCallba
     }
     // See if the plug-in should output verbose information
     g_Verbose = conf.GetBoolValue("Options", "Verbose", false);
+    // Configure update interval
+    {
+        long value = conf.GetLongValue("Options", "UpdateInterval", 60);
+        // Should there be a limit here, higher than 1 second? (we dumb or evil enough to abuse it?)
+        g_UpdateInterval = value <= 0 ? 1 : static_cast< unsigned int >(value);
+    }
     // Attempt to retrieve the list of specified master-servers
     CSimpleIniA::TNamesDepend servers;
     conf.GetAllValues("Servers", "Address", servers);
