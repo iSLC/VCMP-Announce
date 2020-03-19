@@ -25,3 +25,7 @@ else()
 endif(WIN32)
 
 target_include_directories(AnnounceMod PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+
+if(WIN32)
+  target_link_libraries(AnnounceMod wsock32 ws2_32)
+endif()

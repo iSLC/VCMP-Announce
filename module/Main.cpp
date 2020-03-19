@@ -324,7 +324,7 @@ struct Server
      * Base constructor.
     */
     Server(URI && addr)
-        : m_Client(std::make_unique< httplib::Client >(addr.mHost, std::stoi(addr.mPort)))
+        : m_Client(new httplib::Client(addr.mHost, std::stoi(addr.mPort)))
         , m_Fails(0), m_Valid(m_Client->is_valid())
         , m_Addr(std::forward< URI >(addr)), m_Headers{{"User-Agent", "VCMP/0.4"}}, m_Params()
     {
