@@ -330,7 +330,7 @@ struct Server
         if (!m_Valid)
         {
             VerboseError("Master-server '%s' was marked as invalid",
-                            m_Addr.Addr());
+                            m_Addr.Full());
         }
         else
         {
@@ -411,7 +411,7 @@ struct Server
         if (++m_Fails >= 1000)
         {
             MtVerboseError("Master-server '%s' was marked as invalid after %u failures",
-                            m_Addr.Addr(), m_Fails);
+                            m_Addr.Full(), m_Fails);
             // Block further updates
             m_Valid = false;
         }
@@ -445,47 +445,47 @@ struct Server
         // This master-list working?
         if (!m_Valid || !m_Client)
         {
-            MtVerboseMessage("Skipping invalid master-list: `%s`", m_Addr.Addr());
+            MtVerboseMessage("Skipping invalid master-list: `%s`", m_Addr.Full());
             return; // No point int trying to announce to thi server anymore
-        } else MtVerboseMessage("Announcing on master-list: `%s`", m_Addr.Addr());
+        } else MtVerboseMessage("Announcing on master-list: `%s`", m_Addr.Full());
         auto res = m_Client->Post(m_Addr.Path(), m_Headers, m_Params);
-        MtVerboseMessage("Master-list (%s) responded with code: %d", m_Addr.Addr(), res->status);
+        MtVerboseMessage("Master-list (%s) responded with code: %d", m_Addr.Full(), res->status);
         // Identify response code
         switch (res->status)
         {
             case 400:
             {
-                MtVerboseError("Master-server '%s' denied request due to malformed data", m_Addr.Addr());
+                MtVerboseError("Master-server '%s' denied request due to malformed data", m_Addr.Full());
                 // This operation failed
                 Failed();
             } break;
             case 403:
             {
-                MtVerboseError("Master-server '%s' denied request, server version may not have been accepted", m_Addr.Addr());
+                MtVerboseError("Master-server '%s' denied request, server version may not have been accepted", m_Addr.Full());
                 // This operation failed
                 Failed();
             } break;
             case 405:
             {
-                MtVerboseError("Master-server '%s' denied request, GET is not supported", m_Addr.Addr());
+                MtVerboseError("Master-server '%s' denied request, GET is not supported", m_Addr.Full());
                 // This operation failed
                 Failed();
             } break;
             case 408:
             {
-                MtVerboseError("Master-server '%s' timed out while trying to reach your server; are your ports forwarded?", m_Addr.Addr());
+                MtVerboseError("Master-server '%s' timed out while trying to reach your server; are your ports forwarded?", m_Addr.Full());
                 // This operation failed
                 Failed();
             } break;
             case 500:
             {
-                MtVerboseError("Master-server '%s' had an unexpected error while processing your request", m_Addr.Addr());
+                MtVerboseError("Master-server '%s' had an unexpected error while processing your request", m_Addr.Full());
                 // This operation failed
                 Failed();
             } break;
             case 200:
             {
-                MtVerboseMessage("Successfully announced on master-server '%s'", m_Addr.Addr());
+                MtVerboseMessage("Successfully announced on master-server '%s'", m_Addr.Full());
                 // This operation succeeded. Carry on with the rest
                 MakeValid();
             } break;
