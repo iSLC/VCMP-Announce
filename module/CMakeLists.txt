@@ -25,5 +25,3 @@ else()
 endif(WIN32)
 
 target_include_directories(AnnounceMod PRIVATE ${CMAKE_CURRENT_LIST_DIR})
-
-target_link_libraries(AnnounceMod Mongoose)

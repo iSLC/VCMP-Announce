@@ -16,7 +16,13 @@
 #include <utility>
 
 // ------------------------------------------------------------------------------------------------
-#include <mongoose.h>
+#ifndef _WIN32
+    #include <unistd.h>
+    #include <signal.h>
+#endif // _WIN32
+
+// ------------------------------------------------------------------------------------------------
+#include <httplib.h>
 
 // ------------------------------------------------------------------------------------------------
 #include <vcmp.h>
@@ -210,11 +216,11 @@ struct URI
      * Move constructor.
     */
     URI(URI && o)
-        : mHost(o.mHost)
-        , mPort(o.mPort)
-        , mPath(o.mPath)
-        , mFull(o.mFull)
-        , mAddr(o.mAddr)
+        : mHost(std::forward< std::string >(o.mHost))
+        , mPort(std::forward< std::string >(o.mPort))
+        , mPath(std::forward< std::string >(o.mPath))
+        , mFull(std::forward< std::string >(o.mFull))
+        , mAddr(std::forward< std::string >(o.mAddr))
     {
         /* ... */
     }
@@ -242,11 +248,11 @@ struct URI
     {
         if (this != &o)
         {
-            mHost = o.mHost;
-            mPort = o.mPort;
-            mPath = o.mPath;
-            mFull = o.mFull;
-            mAddr = o.mAddr;
+            mHost = std::forward< std::string >(o.mHost);
+            mPort = std::forward< std::string >(o.mPort);
+            mPath = std::forward< std::string >(o.mPath);
+            mFull = std::forward< std::string >(o.mFull);
+            mAddr = std::forward< std::string >(o.mAddr);
         }
         return *this;
     }
@@ -312,17 +318,25 @@ struct URI
 */
 struct Server
 {
+    using ClientPtr = std::unique_ptr< httplib::Client >;
     /* ---------------------------------------------------------------------------------------------
      * Base constructor.
     */
     Server(URI && addr)
-        : m_Conn(nullptr)
-        , m_Fails(0)
-        , m_Valid(false)
-        , m_Addr(addr)
-        , m_Data()
+        : m_Client(std::make_unique< httplib::Client >(addr.mHost, std::stoi(addr.mPort)))
+        , m_Fails(0), m_Valid(m_Client->is_valid())
+        , m_Addr(std::forward< URI >(addr)), m_Headers{{"User-Agent", "VCMP/0.4"}}, m_Params()
     {
-        /* ... */
+        if (!m_Valid)
+        {
+            VerboseError("Master-server '%s' was marked as invalid",
+                            m_Addr.Addr());
+        }
+        else
+        {
+            m_Client->set_follow_location(true);
+            m_Client->set_compress(false);
+        }
     }
 
     /* ---------------------------------------------------------------------------------------------
@@ -334,20 +348,12 @@ struct Server
      * Move constructor.
     */
     Server(Server && o)
-        : m_Conn(o.m_Conn)
-        , m_Fails(o.m_Fails)
-        , m_Valid(o.m_Valid)
-        , m_Addr(o.m_Addr)
-        , m_Data()
+        : m_Client(std::forward< ClientPtr >(o.m_Client))
+        , m_Fails(o.m_Fails), m_Valid(o.m_Valid)
+        , m_Addr(std::forward< URI >(o.m_Addr))
+        , m_Headers(std::forward< httplib::Headers >(o.m_Headers))
+        , m_Params(std::forward< httplib::Params >(o.m_Params))
     {
-        memcpy(m_Data, o.m_Data, sizeof(m_Data));
-        // Take ownership of connection
-        o.m_Conn = nullptr;
-        // Re-associate the connection if necessary
-        if (m_Conn)
-        {
-            m_Conn->user_data = this;
-        }
     }
 
     /* ---------------------------------------------------------------------------------------------
@@ -355,11 +361,7 @@ struct Server
     */
     ~Server()
     {
-        // Disassociate this connection with this server, if necessary
-        if (m_Conn)
-        {
-            m_Conn->user_data = nullptr;
-        }
+
     }
 
     /* ---------------------------------------------------------------------------------------------
@@ -374,18 +376,12 @@ struct Server
     {
         if (this != &o)
         {
-            m_Conn = o.m_Conn;
+            m_Client = std::forward< ClientPtr >(o.m_Client);
             m_Fails = o.m_Fails;
             m_Valid = o.m_Valid;
-            m_Addr = o.m_Addr;
-            memcpy(m_Data, o.m_Data, sizeof(m_Data));
-            // Take ownership of connection
-            o.m_Conn = nullptr;
-            // Re-associate the connection if necessary
-            if (m_Conn)
-            {
-                m_Conn->user_data = this;
-            }
+            m_Addr = std::forward< URI >(o.m_Addr);
+            m_Headers = std::forward< httplib::Headers >(o.m_Headers);
+            m_Params = std::forward< httplib::Params >(o.m_Params);
         }
         return *this;
     }
@@ -404,14 +400,6 @@ struct Server
     const URI & GetURI() const
     {
         return m_Addr;
-    }
-
-    /* ---------------------------------------------------------------------------------------------
-     * Retrieve the associated payload.
-    */
-    CCStr GetData() const
-    {
-        return m_Data;
     }
 
     /* ---------------------------------------------------------------------------------------------
@@ -441,202 +429,79 @@ struct Server
     }
 
     /* ---------------------------------------------------------------------------------------------
-     * Generate the payload message.
+     * Create the server version header.
     */
-    void Generate()
+    void ConfigureServer()
     {
-        char body[32];
-        // Generate the post data
-        if (snprintf(body, sizeof(body), "port=%d", g_Settings.port) < 0)
-        {
-            VerboseError("Unable to generate the post data for '%s'", m_Addr.Host());
-            // Make sure the data is null terminated
-            m_Data[0] = '\0';
-            // Make sure this is marked as invalid
-            m_Valid = false;
-        }
-        // Generate the payload message sent with each message
-        else if (snprintf(m_Data, sizeof(m_Data),
-                    "POST %s HTTP/1.1\r\n"
-                    "Host: %s\r\n"
-                    "Connection: close\r\n"
-                    "User-Agent: VCMP/0.4\r\n"
-                    "VCMP-Version: %u\r\n"
-                    "Content-Type: application/x-www-form-urlencoded\r\n"
-                    "Content-Length: %u\r\n"
-                    "\r\n" /* ... */ "%s"
-                    , m_Addr.Path(), m_Addr.Host()
-                    , g_ServerVersion, strlen(body), body) < 0)
-        {
-            VerboseError("Unable to generate the payload message for '%s'", m_Addr.Host());
-            // Make sure the data is null terminated
-            m_Data[0] = '\0';
-            // Make sure this is marked as invalid
-            m_Valid = false;
-        }
-        else
-        {
-            VerboseMessage("Payload for master-server '%s' is:\n%s", m_Addr.Host(), m_Data);
-            // Make sure this is marked as valid
-            MakeValid();
-        }
+        m_Headers.emplace("VCMP-Version", std::to_string(g_ServerVersion));
+        m_Params.emplace("port", std::to_string(g_Settings.port));
     }
 
     /* ---------------------------------------------------------------------------------------------
      * Send the payload to the associated server to keep the server alive in the master-list.
     */
-    void Update(mg_mgr * manager)
+    void Update()
     {
-        // Is there a connection already waiting response and are we allowed to update?
-        if (m_Conn || !m_Valid)
+        // This master-list working?
+        if (!m_Valid || !m_Client)
         {
-            return; // Keep waiting for a reply and ignore this request
-        }
-        // Attempt to create a connection to the associated master-server
-        m_Conn = mg_connect(manager, m_Addr.Full(), EventHandler);
-        // Make sure that the connection could be created
-        if (!m_Conn)
+            MtVerboseMessage("Skipping invalid master-list: `%s`", m_Addr.Addr());
+            return; // No point int trying to announce to thi server anymore
+        } else MtVerboseMessage("Announcing on master-list: `%s`", m_Addr.Addr());
+        auto res = m_Client->Post(m_Addr.Path(), m_Headers, m_Params);
+        MtVerboseMessage("Master-list (%s) responded with code: %d", m_Addr.Addr(), res->status);
+        // Identify response code
+        switch (res->status)
         {
-            MtVerboseError("Unable to create connection for '%s'", m_Addr.Full());
-            // This operation failed
-            Failed();
-        }
-        else
-        {
-            // Set associated connection user data to this instance
-            m_Conn->user_data = this;
-            // Attach the HTTP protocol component
-            mg_set_protocol_http_websocket(m_Conn);
-            // Send the payload data
-            mg_printf(m_Conn, "%s", m_Data);
-            // Verbose status
-            MtVerboseMessage("Connection created for '%s'", m_Addr.Full());
-        }
-    }
-
-    /* ---------------------------------------------------------------------------------------------
-     * Handle the dispatched connection events.
-    */
-    void HandleEvent(mg_connection * nc, int ev, void * ev_data)
-    {
-        // Identify the event type
-        switch (ev)
-        {
-            case MG_EV_CONNECT:
+            case 400:
             {
-                const int status = *reinterpret_cast< int * >(ev_data);
-                // Validate the connection status
-                if (status != 0)
-                {
-                    MtVerboseError("Unable to connect to master-server '%s' because: %s",
-                                    m_Addr.Host(), strerror(status));
-                    // This operation failed
-                    Failed();
-                }
-                // Specify that this connection is valid and should continue to be updated
-                else
-                {
-                    MakeValid();
-                }
+                MtVerboseError("Master-server '%s' denied request due to malformed data", m_Addr.Addr());
+                // This operation failed
+                Failed();
             } break;
-            case MG_EV_HTTP_REPLY:
+            case 403:
             {
-                // Close this connection immediately (explicit)
-                nc->flags |= MG_F_CLOSE_IMMEDIATELY;
-                // Disassociate this connection with this server
-                m_Conn = nullptr;
-                // Obtain the event data
-                http_message * msg = reinterpret_cast< http_message * >(ev_data);
-                // Output the received info
-                MtVerboseMessage("Received data from '%s'\n%.*s",
-                                    m_Addr.Host(),msg->message.len, msg->message.p);
-                // Inspect response
-                switch (msg->resp_code)
-                {
-                    case 400:
-                    {
-                        MtVerboseError("Master-server '%s' denied request due to malformed data", m_Addr.Host());
-                        // This operation failed
-                        Failed();
-                    } break;
-                    case 403:
-                    {
-                        MtVerboseError("Master-server '%s' denied request, server version may not have been accepted", m_Addr.Host());
-                        // This operation failed
-                        Failed();
-                    } break;
-                    case 405:
-                    {
-                        MtVerboseError("Master-server '%s' denied request, GET is not supported", m_Addr.Host());
-                        // This operation failed
-                        Failed();
-                    } break;
-                    case 408:
-                    {
-                        MtVerboseError("Master-server '%s' timed out while trying to reach your server; are your ports forwarded?", m_Addr.Host());
-                        // This operation failed
-                        Failed();
-                    } break;
-                    case 500:
-                    {
-                        MtVerboseError("Master-server '%s' had an unexpected error while processing your request", m_Addr.Host());
-                        // This operation failed
-                        Failed();
-                    } break;
-                    case 200:
-                    {
-                        MtVerboseMessage("Successfully announced on master-server '%s'", m_Addr.Host());
-                        // This operation succeeded
-                        MakeValid();
-                    } break;
-                    default: /* Unknown response */ break;
-                }
+                MtVerboseError("Master-server '%s' denied request, server version may not have been accepted", m_Addr.Addr());
+                // This operation failed
+                Failed();
             } break;
-            case MG_EV_SEND:
+            case 405:
             {
-                MtVerboseMessage("Sent %d bytes to master-server '%s'",
-                                    *reinterpret_cast< int * >(ev_data), m_Addr.Host());
+                MtVerboseError("Master-server '%s' denied request, GET is not supported", m_Addr.Addr());
+                // This operation failed
+                Failed();
             } break;
-            case MG_EV_RECV:
+            case 408:
             {
-                MtVerboseMessage("Received %d bytes from master-server '%s'",
-                                    *reinterpret_cast< int * >(ev_data), m_Addr.Host());
+                MtVerboseError("Master-server '%s' timed out while trying to reach your server; are your ports forwarded?", m_Addr.Addr());
+                // This operation failed
+                Failed();
             } break;
-            case MG_EV_CLOSE:
+            case 500:
             {
-                MtVerboseMessage("Closed connection to master-server '%s'", m_Addr.Host());
-                // Disassociate this connection with this server
-                m_Conn = nullptr;
+                MtVerboseError("Master-server '%s' had an unexpected error while processing your request", m_Addr.Addr());
+                // This operation failed
+                Failed();
             } break;
-            default: /* Ignore event... */ break;
-        }
-    }
-
-    /* ---------------------------------------------------------------------------------------------
-     * Receive events from the connection manager.
-    */
-    static void EventHandler(mg_connection * nc, int ev, void * ev_data)
-    {
-        // Is there any user-data associated with this connection?
-        if (nc->user_data)
-        {
-            static_cast< Server * >(nc->user_data)->HandleEvent(nc, ev, ev_data);
-        }
-        // Close this connection immediately and ignore it
-        else
-        {
-            nc->flags |= MG_F_CLOSE_IMMEDIATELY;
+            case 200:
+            {
+                MtVerboseMessage("Successfully announced on master-server '%s'", m_Addr.Addr());
+                // This operation succeeded. Carry on with the rest
+                MakeValid();
+            } break;
+            default: /* Unknown response */ break;
         }
     }
 
 private:
 
     // ---------------------------------------------------------------------------------------------
-    mg_connection*  m_Conn; // The associated server connection.
-    unsigned        m_Fails; // How many attempts to create a connection failed.
-    bool            m_Valid; // Whether we should completely ignore this master-server.
-    URI             m_Addr; // The master-server address information.
-    char            m_Data[256]; // The payload to be sent with each update.
+    ClientPtr           m_Client; // The associated server connection.
+    unsigned            m_Fails; // How many attempts to create a connection failed.
+    bool                m_Valid; // Whether we should completely ignore this master-server.
+    URI                 m_Addr; // The master-server address information.
+    httplib::Headers    m_Headers; // Request headers.
+    httplib::Params     m_Params; // Request parameters.
 };
 
 // ------------------------------------------------------------------------------------------------
@@ -658,41 +523,29 @@ static Messages             g_Messages; // Messages queued from the announce thr
 */
 void AnnounceThread(Servers && servers)
 {
-    // The connection manager and connection options
-    mg_mgr               manager;
-    mg_serve_http_opts   options;
-    // Initialize the manager and configuration structures to 0
-    memset(&manager, 0, sizeof(mg_mgr));
-    memset(&options, 0, sizeof(mg_serve_http_opts));
-    // Initialize the connection manager
-    mg_mgr_init(&manager, nullptr);
-    // Send the initial update to all master-servers
-    for (auto & server : servers)
-    {
-        server.Update(&manager);
-    }
-    // Used to know how many server updates were skipped
-    unsigned count = 0;
+    MtVerboseMessage("Announce thread started.");
     // Enter the announcement loop
     while (g_Announce)
     {
-        // Pool for events from the connection manager
-        mg_mgr_poll(&manager, 250);
-        // See if we must issue any updates
-        if (++count < 240)
-        {
-            continue;
-        }
-        // Reset the counter
-        count = 0;
-        // Process the specified servers
+        // Grab the current time point
+        std::chrono::time_point< std::chrono::steady_clock > next = std::chrono::steady_clock::now();
+        // Set the time-point for next update
+        next += std::chrono::seconds(60);
+        // Tell the master-list we're alive
         for (auto & server : servers)
         {
-            server.Update(&manager);
+            server.Update();
         }
+        // Grab the current time point
+        std::chrono::time_point<std::chrono::steady_clock> curr;
+        // Sleep until the next appointed update time point
+        do {
+            // Sleep for 1/4'th of a second
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            // Check elapsed time
+            curr = std::chrono::steady_clock::now();
+        } while (g_Announce && (next > curr));
     }
-    // Release the connection manager resources
-    mg_mgr_free(&manager);
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -729,21 +582,10 @@ static uint8_t OnServerInitialise(void)
     // Obtain the server version. This doesn't change much
     g_ServerVersion = _Func->GetServerVersion();
     // Attempt to generate the update payload
-    for (unsigned n = 0; n < g_Servers.size();)
+    for (auto & server : g_Servers)
     {
         // Attempt to generate the payload
-        g_Servers[n].Generate();
-        // See if any failures occurred
-        if (g_Servers[n].GetData()[0] == 0)
-        {
-            // Erase the server completely
-            g_Servers.erase(g_Servers.begin() + n);
-        }
-        // Move to the next server
-        else
-        {
-            ++n;
-        }
+        server.ConfigureServer();
     }
     // See if any servers are left
     if (g_Servers.empty())
@@ -1006,6 +848,19 @@ void MtVerboseError(CCStr msg, ...)
 } // Namespace:: SMod
 
 // ------------------------------------------------------------------------------------------------
+#ifdef SMOD_OS_WINDOWS
+BOOL WINAPI ConsoleHandler(DWORD signal) {
+
+    if (signal == CTRL_C_EVENT) SMod::g_Announce = false;
+    return FALSE;
+}
+#else
+void ConsoleHandler(int s){
+    SMod::g_Announce = false;
+}
+#endif // SMOD_OS_WINDOWS
+
+// ------------------------------------------------------------------------------------------------
 SMOD_API_EXPORT unsigned int VcmpPluginInit(PluginFuncs* functions, PluginCallbacks* callbacks, PluginInfo* info)
 {
     using namespace SMod;
@@ -1037,8 +892,11 @@ SMOD_API_EXPORT unsigned int VcmpPluginInit(PluginFuncs* functions, PluginCallba
         switch (ini_ret)
         {
             case SI_FAIL:   OutputError("Failed to load the configuration file. Probably invalid");
+            // fall through
             case SI_NOMEM:  OutputError("Run out of memory while loading the configuration file");
+            // fall through
             case SI_FILE:   OutputError("Failed to load the configuration file: announce.ini");
+            // fall through
             default:        OutputError("Failed to load the configuration file for some unforeseen reason");
         }
         // Plug-in failed to load configurations
@@ -1093,6 +951,17 @@ SMOD_API_EXPORT unsigned int VcmpPluginInit(PluginFuncs* functions, PluginCallba
     _Clbk->OnServerInitialise       = OnServerInitialise;
     _Clbk->OnServerShutdown         = OnServerShutdown;
     _Clbk->OnServerFrame            = OnServerFrame;
+#ifdef SMOD_OS_WINDOWS
+    if (!SetConsoleCtrlHandler(ConsoleHandler, TRUE)) {
+        VerboseError("Could not set control handler.");
+    }
+#else
+    struct sigaction sig_int_hnd;
+    sig_int_hnd.sa_handler = ConsoleHandler;
+    sigemptyset(&sig_int_hnd.sa_mask);
+    sig_int_hnd.sa_flags = 0;
+    sigaction(SIGINT, &sig_int_hnd, NULL);
+#endif // SMOD_OS_WINDOWS
     // Notify that the plug-in was successfully loaded
     VerboseMessage("Successfully loaded %s", SMOD_NAME);
     // Done!

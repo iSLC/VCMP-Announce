@@ -178,21 +178,14 @@
 			<Add option="-static-libgcc" />
 			<Add option="-static-libstdc++" />
 			<Add option="-enable-static" />
-			<Add option="-DNN_NO_EXPORTS" />
 			<Add directory="../module" />
 			<Add directory="../shared" />
 			<Add directory="../include" />
 			<Add directory="../config/common" />
 		</Compiler>
-		<Linker>
-			<Add library="mongoose" />
-		</Linker>
 		<Unit filename="../module/ConvertUTF.cpp" />
 		<Unit filename="../module/Main.cpp" />
 		<Extensions>
-			<code_completion />
-			<envvars />
-			<debugger />
 			<lib_finder disable_auto="1" />
 		</Extensions>
 	</Project>
